@@ -22,7 +22,7 @@ A command-line tool to fetch Medium articles, save them locally, and open them i
 ### Step 1: Clone the Repository
 
 ```bash
-git clone <https://github.com/abdukarimovhm/medium-reader>
+git clone https://github.com/abdukarimovhm/medium-reader
 cd medium-reader
 ```
 
