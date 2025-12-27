@@ -112,6 +112,13 @@ def extract_article_from_meta_tags(html: str) -> Dict[str, Optional[str]]:
             if title and title.lower() != 'medium' and len(title) > 5:
                 meta_data['title'] = title
     
+    # Clean up title: remove "Freedium" suffix if present (from freedium.cfd)
+    if meta_data.get('title'):
+        title = meta_data['title']
+        # Remove " - Freedium" or " | Freedium" suffixes
+        title = re.sub(r'\s*[-|]\s*Freedium\s*$', '', title, flags=re.I)
+        meta_data['title'] = title.strip()
+    
     # Extract author
     author_tag = soup.find('meta', {'name': 'author'})
     if author_tag and author_tag.get('content'):
@@ -212,6 +219,7 @@ def extract_article_body(html: str) -> Optional[str]:
     """Extract article body content from HTML.
     
     Uses the postBody div which contains the complete article in correct order.
+    Also handles freedium.cfd structure for member-only articles.
     
     Args:
         html: HTML content
@@ -240,6 +248,51 @@ def extract_article_body(html: str) -> Optional[str]:
         # Fallback: return postBody if it has content
         if len(post_body.get_text()) > 500:
             return str(post_body)
+    
+    # Method 1.5: Extract from freedium.cfd structure (for member-only articles)
+    # Freedium uses a div with class "main-content" or a div with Georgia serif font
+    # The serif div typically has more complete content, so check both and use the one with more content
+    
+    main_content = soup.find('div', class_='main-content')
+    main_content_text_len = len(main_content.get_text()) if main_content else 0
+    
+    # Find the div with Georgia serif font (freedium's content wrapper - usually has more content)
+    serif_divs = soup.find_all('div', style=lambda x: x and 'Georgia' in str(x) if x else False)
+    best_serif_div = None
+    best_serif_len = 0
+    
+    for serif_div in serif_divs:
+        text_len = len(serif_div.get_text())
+        if text_len > best_serif_len:
+            best_serif_len = text_len
+            best_serif_div = serif_div
+    
+    # Use whichever has more content
+    if best_serif_len > main_content_text_len and best_serif_len > 1000:
+        # Use serif div
+        serif_div_copy = BeautifulSoup(str(best_serif_div), 'lxml').find(best_serif_div.name, style=best_serif_div.get('style'))
+        if serif_div_copy:
+            # Remove "Go to the original" link specifically
+            for link in serif_div_copy.find_all('a', href=lambda x: x and '#bypass' in str(x) if x else False):
+                link.decompose()
+            # Also remove links with "Go to the original" text
+            for link in serif_div_copy.find_all('a'):
+                if link.get_text().strip() in ['< Go to the original', 'Go to the original']:
+                    link.decompose()
+            _clean_content_element(serif_div_copy)
+            return str(serif_div_copy)
+    elif main_content_text_len > 1000:
+        # Use main-content
+        main_content_copy = BeautifulSoup(str(main_content), 'lxml').find('div', class_='main-content')
+        if main_content_copy:
+            # Remove "Go to the original" link
+            for link in main_content_copy.find_all('a', href=lambda x: x and '#bypass' in str(x) if x else False):
+                link.decompose()
+            for link in main_content_copy.find_all('a'):
+                if link.get_text().strip() in ['< Go to the original', 'Go to the original']:
+                    link.decompose()
+            _clean_content_element(main_content_copy)
+            return str(main_content_copy)
     
     # Method 2: Extract from JSON-LD articleBody (fallback)
     json_ld_data = extract_json_ld(html)

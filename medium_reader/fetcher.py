@@ -69,14 +69,74 @@ class FetchError(Exception):
     pass
 
 
-def fetch_article(url: str, timeout: int = 30) -> str:
+def _is_member_only_article(html: str) -> bool:
+    """Check if the article is a member-only article.
+    
+    Args:
+        html: HTML content of the article
+        
+    Returns:
+        bool: True if article appears to be member-only
+    """
+    import re
+    from bs4 import BeautifulSoup
+    
+    # Check for member-only indicators in HTML
+    member_indicators = [
+        r'member-only',
+        r'member only',
+        r'isMarkedPaywallOnly',
+        r'isLockedPreviewOnly',
+        r'paywall',
+        r'locked.*preview',
+    ]
+    
+    html_lower = html.lower()
+    for indicator in member_indicators:
+        if re.search(indicator, html_lower, re.I):
+            return True
+    
+    # Check if content seems truncated (very short postBody)
+    soup = BeautifulSoup(html, 'lxml')
+    post_body = soup.find('div', {'data-testid': 'postBody'})
+    if post_body:
+        text_length = len(post_body.get_text())
+        # If postBody is very short (< 2000 chars), might be truncated
+        if text_length < 2000:
+            # Check if it ends with ellipsis or seems cut off
+            text = post_body.get_text()
+            if text.endswith('...') or '...' in text[-100:]:
+                return True
+            # Also check if it seems incomplete (ends mid-sentence)
+            if text and not text[-1] in '.!?':
+                # Might be cut off
+                return True
+    
+    # If no postBody found at all, might be member-only
+    if not post_body:
+        # Check if there's very little content overall
+        body = soup.find('body')
+        if body:
+            body_text = body.get_text()
+            # If body has less than 3000 chars of text, might be truncated
+            if len(body_text) < 3000:
+                # Check for member-only indicators in visible text
+                if re.search(r'member.*only|paywall|locked', body_text, re.I):
+                    return True
+    
+    return False
+
+
+def fetch_article(url: str, timeout: int = 30, use_freedium: bool = False) -> str:
     """Fetch the HTML content of a Medium article.
     
     Uses a persistent session to maintain cookies and improve success rate.
+    For member-only articles, can use freedium.cfd proxy.
     
     Args:
         url: URL of the Medium article
         timeout: Request timeout in seconds
+        use_freedium: If True, use freedium.cfd proxy (for member-only articles)
         
     Returns:
         str: HTML content of the article
@@ -85,26 +145,43 @@ def fetch_article(url: str, timeout: int = 30) -> str:
         FetchError: If the article cannot be fetched
     """
     session = get_session()
-    headers = get_headers_with_referrer(url)
+    
+    # Use freedium.cfd proxy if requested
+    if use_freedium:
+        freedium_url = f"https://freedium.cfd/{url}"
+        headers = get_headers_with_referrer(freedium_url)
+    else:
+        headers = get_headers_with_referrer(url)
+        freedium_url = None
     
     try:
         # First, visit the Medium homepage to establish session and cookies
-        # This helps make subsequent requests look more legitimate
-        try:
-            session.get('https://medium.com/', headers=headers, timeout=timeout)
-        except Exception:
-            # If homepage visit fails, continue anyway
-            pass
+        # (only if not using freedium)
+        if not use_freedium:
+            try:
+                session.get('https://medium.com/', headers=headers, timeout=timeout)
+            except Exception:
+                # If homepage visit fails, continue anyway
+                pass
         
-        # Now fetch the actual article
+        # Fetch the article (or from freedium proxy)
+        target_url = freedium_url if freedium_url else url
         response = session.get(
-            url,
+            target_url,
             headers=headers,
             timeout=timeout,
             allow_redirects=True
         )
         response.raise_for_status()
-        return response.text
+        html = response.text
+        
+        # If we didn't use freedium, check if article is member-only
+        # If so, retry with freedium
+        if not use_freedium and _is_member_only_article(html):
+            # Retry with freedium proxy
+            return fetch_article(url, timeout, use_freedium=True)
+        
+        return html
     except requests.exceptions.Timeout:
         raise FetchError(f"Request timed out while fetching {url}")
     except requests.exceptions.ConnectionError:
