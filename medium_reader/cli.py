@@ -1,6 +1,7 @@
 """CLI entry point for medium-reader."""
 
 import argparse
+import logging
 import sys
 import webbrowser
 from urllib.parse import urlparse
@@ -41,8 +42,27 @@ def main():
         action='store_true',
         help='Do not open the article in browser after fetching'
     )
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='Enable debug logging to show detailed connection and request information'
+    )
     
     args = parser.parse_args()
+    
+    # Set up logging
+    if args.debug:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        logging.debug("Debug mode enabled")
+    else:
+        logging.basicConfig(
+            level=logging.WARNING,
+            format='%(levelname)s: %(message)s'
+        )
     
     # Validate URL
     if not validate_url(args.url):
@@ -54,9 +74,11 @@ def main():
     # Fetch article
     print(f"Fetching article from {args.url}...")
     try:
-        html = fetch_article(args.url)
+        html = fetch_article(args.url, debug=args.debug)
     except FetchError as e:
         print(f"Error: {e}", file=sys.stderr)
+        if args.debug:
+            logging.exception("Full error traceback:")
         sys.exit(1)
     
     # Parse article
