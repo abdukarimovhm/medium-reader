@@ -75,7 +75,7 @@ BOOT_JS = (
     "if(!t||t.tagName!=='IMG'||!t.closest)return;var f=t.closest('figure');"
     "if(!f||f.classList.contains('img-broken'))return;f.classList.add('img-broken');"
     "var a=document.createElement('a');a.className='img-fallback';a.href=t.currentSrc||t.src;a.target='_blank';"
-    "a.rel='noopener';a.textContent='Image didn\\u2019t load \\u2014 open it \\u2197';f.insertBefore(a,t);},true);"
+    "a.rel='noopener';a.textContent='Image didn\\u2019t load \\u2014 open it \\u2197';t.parentNode.insertBefore(a,t);},true);"
     "})();"
 )
 

@@ -115,6 +115,10 @@ class FreediumParsingTests(unittest.TestCase):
         for junk in ('class=', 'style=', 'onerror', 'data-', '<svg', '<!--', 'toc-list', 'By Jane Writer', '<picture', '<source'):
             self.assertNotIn(junk, body, junk)
 
+    def test_soft_break_keeps_space_before_inline_element(self):
+        html = clean_body('<p>first line\nsecond\n<strong>Bold</strong></p>', soft_breaks=True)
+        self.assertIn('first line<br/>second <strong>Bold</strong>', html)
+
     def test_headings_start_at_h2_and_soft_breaks_kept(self):
         body = self.article.body
         self.assertIn('<h2 id="intro">Intro</h2>', body)
@@ -188,6 +192,10 @@ class FetcherTests(unittest.TestCase):
         paywalled = long_free.replace('true', 'false')
         self.assertTrue(fetcher._is_member_only_article(paywalled))
 
+    def test_short_free_article_is_not_member_only(self):
+        short_free = '<script type="application/ld+json">{"isAccessibleForFree":true}</script><article>Short.</article>'
+        self.assertFalse(fetcher._is_member_only_article(short_free))
+
     def test_falls_through_proxies_and_keeps_preview_last(self):
         preview = fetcher.FetchResult('<article>short</article>', 'https://medium.com/x', 'medium', partial=True)
         with mock.patch.object(fetcher, '_fetch_direct', return_value=preview), \
@@ -223,6 +231,17 @@ class StorageTests(unittest.TestCase):
         index = storage.write_index(Path(self.tmp.name)).read_text()
         self.assertIn('A Test Article', index)
         self.assertIn('Jane Writer', index)
+
+    def test_metadata_read_in_any_attribute_order(self):
+        path = Path(self.tmp.name) / 'x.html'
+        path.write_text('<html><head><meta content="https://medium.com/p/abc12345" name="mr:url"/>'
+                        '<meta name="mr:author" content="Jane &amp; Co"></head></html>', encoding='utf-8')
+        self.assertEqual(storage.read_saved_metadata(path),
+                         {'mr:url': 'https://medium.com/p/abc12345', 'mr:author': 'Jane & Co'})
+
+    def test_p_url_matches_slug_url(self):
+        self.assertEqual(storage._url_key('https://medium.com/p/422d72724422'),
+                         storage._url_key('https://medium.com/@a/the-myth-422d72724422'))
 
     def test_fix_mojibake(self):
         broken = 'Don’t → stop'.encode('utf-8').decode('latin-1')

@@ -23,7 +23,7 @@ DEFAULT_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
+    'Accept-Encoding': 'gzip, deflate',  # no br: requests can't decode it without the brotli package
     'Connection': 'keep-alive',
     'Upgrade-Insecure-Requests': '1',
     'Sec-Fetch-Dest': 'document',
@@ -129,8 +129,7 @@ def _is_member_only_article(html: str) -> bool:
         for item in data if isinstance(data, list) else [data]:
             if isinstance(item, dict) and 'isAccessibleForFree' in item:
                 value = item['isAccessibleForFree']
-                if value is False or str(value).lower() == 'false':
-                    return True
+                return value is False or str(value).lower() == 'false'
     # No explicit marker: treat a very short article as a truncated preview.
     return _article_text_length(soup) < MIN_ARTICLE_CHARS
 

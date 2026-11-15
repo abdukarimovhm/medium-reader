@@ -1,5 +1,6 @@
 """Saving articles, the library index, offline images, and repairing old saves."""
 
+import hashlib
 import html as html_lib
 import logging
 import os
@@ -72,7 +73,8 @@ def get_unique_filename(storage_dir: Path, base_filename: str) -> str:
 # Reading metadata back from saved files
 # ---------------------------------------------------------------------------
 
-_META_RE = re.compile(r'<meta name="(mr:[\w-]+)" content="([^"]*)"')
+_META_TAG_RE = re.compile(r'<meta\b[^>]*>', re.I)
+_ATTR_RE = re.compile(r'([\w:-]+)\s*=\s*"([^"]*)"')
 
 
 def read_saved_metadata(path: Path) -> Dict[str, str]:
@@ -83,7 +85,14 @@ def read_saved_metadata(path: Path) -> Dict[str, str]:
     except OSError:
         return {}
     head = head.split('</head>', 1)[0]
-    return {k: html_lib.unescape(v) for k, v in _META_RE.findall(head)}
+    found = {}
+    # Attribute order varies: pages re-serialized by BeautifulSoup (--offline) put content first.
+    for tag in _META_TAG_RE.findall(head):
+        attrs = dict(_ATTR_RE.findall(tag))
+        name = attrs.get('name', '')
+        if name.startswith('mr:') and 'content' in attrs:
+            found[name] = html_lib.unescape(attrs['content'])
+    return found
 
 
 def find_saved_article(storage_dir: Path, url: str) -> Optional[Path]:
@@ -101,7 +110,7 @@ def find_saved_article(storage_dir: Path, url: str) -> Optional[Path]:
 def _url_key(url: str) -> str:
     """Compare Medium URLs by their post id when they have one."""
     parsed = urlparse(url)
-    match = re.search(r'-([0-9a-f]{8,12})$', parsed.path.rstrip('/'))
+    match = re.search(r'[-/]([0-9a-f]{8,12})$', parsed.path.rstrip('/'))
     if match:
         return match.group(1)
     return (parsed.netloc.lower().removeprefix('www.') + parsed.path.rstrip('/')).lower()
@@ -170,7 +179,8 @@ def localize_images(page_html: str, storage_dir: Path, stem: str) -> str:
     for img in images:
         if img['src'] not in urls:
             urls.append(img['src'])
-    targets = {u: assets / f"{i + 1:02d}{_extension_for(u)}" for i, u in enumerate(urls)}
+    # Name files after their URL so a re-save never reuses a file for a different image.
+    targets = {u: assets / f"{hashlib.sha1(u.encode('utf-8')).hexdigest()[:12]}{_extension_for(u)}" for u in urls}
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         ok = dict(zip(urls, pool.map(lambda u: targets[u].exists() or _download(u, targets[u]), urls)))
@@ -345,7 +355,10 @@ def repair_library(storage_dir: Optional[Path] = None, backup: bool = True) -> d
     for path in _article_files(storage_dir):
         try:
             original = path.read_text(encoding='utf-8', errors='replace')
-            article, saved = rebuild_article(fix_mojibake(original))
+            # Only version-1 pages can contain mojibake; never touch already-correct text.
+            if 'name="mr:version"' not in original:
+                original = fix_mojibake(original)
+            article, saved = rebuild_article(original)
             saved_at = datetime.fromisoformat(saved) if saved else datetime.fromtimestamp(path.stat().st_mtime)
             page = generate_html(article, saved_at=saved_at)
             path.write_text(page, encoding='utf-8')

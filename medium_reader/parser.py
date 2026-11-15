@@ -362,6 +362,11 @@ def _newlines_to_breaks(root: Tag, soup: BeautifulSoup) -> None:
             if '\n' not in stripped:
                 continue
             parts = stripped.split('\n')
+            # Edge newlines separate this text from neighbouring inline elements: keep them as spaces.
+            if text.startswith('\n'):
+                parts[0] = ' ' + parts[0]
+            if text.endswith('\n'):
+                parts[-1] = parts[-1] + ' '
             new_nodes = []
             for i, part in enumerate(parts):
                 if i:

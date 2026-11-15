@@ -21,18 +21,23 @@ def esc(value: Optional[str]) -> str:
     return html.escape(value or '', quote=True)
 
 
+def _short(dt: datetime) -> str:
+    """'Nov 5, 2026' (portable: %-d does not exist on Windows)."""
+    return f"{dt:%b} {dt.day}, {dt.year}"
+
+
 def format_date(date_string: Optional[str]) -> str:
     """Format ISO or 'November 11, 2026' / 'Nov 11, 2017' dates for display."""
     if not date_string:
         return ''
     value = date_string.strip()
     try:
-        return datetime.fromisoformat(value.replace('Z', '+00:00')).strftime('%b %-d, %Y')
+        return _short(datetime.fromisoformat(value.replace('Z', '+00:00')))
     except ValueError:
         pass
     for fmt in ('%B %d, %Y', '%b %d, %Y', '%Y-%m-%d'):
         try:
-            return datetime.strptime(value, fmt).strftime('%b %-d, %Y')
+            return _short(datetime.strptime(value, fmt))
         except ValueError:
             continue
     return value
@@ -142,7 +147,7 @@ def generate_html(article: ArticleData, saved_at: Optional[datetime] = None) -> 
     footer_bits = []
     if article.url:
         footer_bits.append(f'Original: <a href="{esc(article.url)}" target="_blank" rel="noopener">{esc(article.url)}</a>')
-    footer_bits.append(f'Saved {saved_at.strftime("%b %-d, %Y")} via {esc(_source_label(article.source, article.url))} with medium-reader.')
+    footer_bits.append(f'Saved {_short(saved_at)} via {esc(_source_label(article.source, article.url))} with medium-reader.')
 
     end_note = 'You’ve reached the end.'
     meta = {
