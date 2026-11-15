@@ -1,306 +1,259 @@
-"""HTML file generation from parsed article content."""
+"""HTML generation: the reading page for one article, and the library index."""
 
-from typing import Optional
+import html
+from datetime import datetime
+from typing import Iterable, List, Optional
+
 from bs4 import BeautifulSoup
+
 from .parser import ArticleData
+from .theme import (ARTICLE_CSS, ARTICLE_JS, BASE_CSS, BOOT_JS, INDEX_CSS, INDEX_JS,
+                    SETTINGS_HTML)
+
+GENERATOR_VERSION = '3'
 
 
-HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title}</title>
-    <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
-        
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background-color: #fff;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-        }}
-        
-        .article-header {{
-            margin-bottom: 40px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid #e0e0e0;
-        }}
-        
-        .article-title {{
-            font-size: 2.5em;
-            font-weight: 700;
-            margin-bottom: 15px;
-            color: #000;
-            line-height: 1.2;
-        }}
-        
-        .article-meta {{
-            color: #666;
-            font-size: 0.95em;
-            margin-bottom: 20px;
-        }}
-        
-        .article-author {{
-            font-weight: 500;
-            color: #333;
-        }}
-        
-        .article-date {{
-            margin-top: 5px;
-            color: #999;
-        }}
-        
-        .article-image {{
-            width: 100%;
-            max-width: 100%;
-            height: auto;
-            margin: 30px 0;
-            border-radius: 4px;
-        }}
-        
-        .article-description {{
-            font-size: 1.2em;
-            color: #666;
-            font-style: italic;
-            margin-bottom: 30px;
-            line-height: 1.5;
-        }}
-        
-        .article-body {{
-            font-size: 1.1em;
-            line-height: 1.8;
-        }}
-        
-        .article-body p {{
-            margin-bottom: 20px;
-        }}
-        
-        .article-body h1,
-        .article-body h2,
-        .article-body h3,
-        .article-body h4 {{
-            margin-top: 40px;
-            margin-bottom: 20px;
-            font-weight: 700;
-            line-height: 1.3;
-        }}
-        
-        .article-body h1 {{
-            font-size: 2em;
-        }}
-        
-        .article-body h2 {{
-            font-size: 1.75em;
-        }}
-        
-        .article-body h3 {{
-            font-size: 1.5em;
-        }}
-        
-        .article-body h4 {{
-            font-size: 1.25em;
-        }}
-        
-        .article-body img {{
-            max-width: 100%;
-            height: auto;
-            margin: 30px 0;
-            border-radius: 4px;
-        }}
-        
-        .article-body a {{
-            color: #007bff;
-            text-decoration: none;
-        }}
-        
-        .article-body a:hover {{
-            text-decoration: underline;
-        }}
-        
-        .article-body blockquote {{
-            border-left: 4px solid #ddd;
-            padding-left: 20px;
-            margin: 30px 0;
-            color: #666;
-            font-style: italic;
-        }}
-        
-        .article-body code {{
-            background-color: #f4f4f4;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-        }}
-        
-        .article-body pre {{
-            background-color: #f4f4f4;
-            padding: 20px;
-            border-radius: 4px;
-            overflow-x: auto;
-            margin: 30px 0;
-        }}
-        
-        .article-body pre code {{
-            background-color: transparent;
-            padding: 0;
-        }}
-        
-        .article-body ul,
-        .article-body ol {{
-            margin: 20px 0;
-            padding-left: 40px;
-        }}
-        
-        .article-body li {{
-            margin-bottom: 10px;
-        }}
-        
-        @media (max-width: 768px) {{
-            body {{
-                padding: 15px;
-            }}
-            
-            .article-title {{
-                font-size: 2em;
-            }}
-            
-            .article-body {{
-                font-size: 1em;
-            }}
-        }}
-    </style>
-</head>
-<body>
-    <article>
-        <header class="article-header">
-            <h1 class="article-title">{title}</h1>
-            <div class="article-meta">
-                {meta}
-            </div>
-            {image}
-            {description}
-        </header>
-        <div class="article-body">
-            {body}
-        </div>
-    </article>
-</body>
-</html>"""
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def esc(value: Optional[str]) -> str:
+    return html.escape(value or '', quote=True)
+
+
+def _short(dt: datetime) -> str:
+    """'Nov 5, 2026' (portable: %-d does not exist on Windows)."""
+    return f"{dt:%b} {dt.day}, {dt.year}"
 
 
 def format_date(date_string: Optional[str]) -> str:
-    """Format a date string for display.
-    
-    Args:
-        date_string: ISO date string or None
-        
-    Returns:
-        str: Formatted date string
-    """
+    """Format ISO or 'November 11, 2026' / 'Nov 11, 2017' dates for display."""
     if not date_string:
-        return ""
-    
+        return ''
+    value = date_string.strip()
     try:
-        from datetime import datetime
-        dt = datetime.fromisoformat(date_string.replace('Z', '+00:00'))
-        return dt.strftime('%B %d, %Y')
-    except (ValueError, AttributeError):
-        return date_string
+        return _short(datetime.fromisoformat(value.replace('Z', '+00:00')))
+    except ValueError:
+        pass
+    for fmt in ('%B %d, %Y', '%b %d, %Y', '%Y-%m-%d'):
+        try:
+            return _short(datetime.strptime(value, fmt))
+        except ValueError:
+            continue
+    return value
 
 
-def clean_html_body(body: str) -> str:
-    """Clean and process the article body HTML.
-    
-    Args:
-        body: Raw HTML body content
-        
-    Returns:
-        str: Cleaned HTML body content
-    """
-    if not body:
-        return ""
-    
-    # If body is plain text, wrap it in paragraphs
-    if not body.strip().startswith('<'):
-        paragraphs = [p.strip() for p in body.split('\n\n') if p.strip()]
-        return '\n'.join(f'<p>{p}</p>' for p in paragraphs)
-    
-    # Parse and clean HTML
-    soup = BeautifulSoup(body, 'lxml')
-    
-    # Remove nested html/body tags
-    for nested in soup.find_all(['html', 'body']):
-        nested.unwrap()
-    
-    # Remove script and style tags
-    for script in soup(['script', 'style']):
-        script.decompose()
-    
-    # Ensure images have proper attributes
-    for img in soup.find_all('img'):
+def parse_date(date_string: Optional[str]) -> Optional[datetime]:
+    """Best-effort parse of the date formats we store, for sorting."""
+    if not date_string:
+        return None
+    value = date_string.strip()
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00')).replace(tzinfo=None)
+    except ValueError:
+        pass
+    for fmt in ('%B %d, %Y', '%b %d, %Y', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _source_label(source: Optional[str], url: Optional[str]) -> str:
+    return {'medium': 'Medium', 'freedium': 'freedium-mirror.cfd', 'freedium-old': 'freedium.cfd'}.get(source or '', 'Medium')
+
+
+def build_toc(body_html: str) -> List[dict]:
+    """Headings for the table of contents: [{id, text, level}]."""
+    soup = BeautifulSoup(body_html or '', 'lxml')
+    heads = []
+    for h in soup.find_all(['h2', 'h3']):
+        if h.get('id') and h.get_text(strip=True):
+            heads.append({'id': h['id'], 'text': h.get_text(' ', strip=True), 'level': int(h.name[1])})
+    return heads
+
+
+def _toc_list(heads: List[dict]) -> str:
+    top = min(h['level'] for h in heads)
+    items = []
+    for h in heads:
+        cls = ' class="sub"' if h['level'] > top else ''
+        items.append(f'<li{cls}><a href="#{esc(h["id"])}">{esc(h["text"])}</a></li>')
+    return '<ol>' + ''.join(items) + '</ol>'
+
+
+def _prepare_body(body_html: str) -> str:
+    """Final touches on the cleaned body for display."""
+    soup = BeautifulSoup(body_html or '', 'lxml')
+    for i, img in enumerate(soup.find_all('img')):
         if not img.get('src'):
             img.decompose()
-        else:
-            img['loading'] = 'lazy'
-    
-    # Return the content - if there's a single top-level div, return it
-    # Otherwise return the whole soup content
-    top_level = [elem for elem in soup.children if hasattr(elem, 'name') and elem.name]
-    if len(top_level) == 1 and top_level[0].name == 'div':
-        return str(top_level[0])
-    
-    return str(soup)
+            continue
+        if not img.get('data-full'):
+            img['data-full'] = img['src']
+        img['loading'] = 'eager' if i < 2 else 'lazy'
+        img['decoding'] = 'async'
+        # Large charts and photos get a little more room than the text column.
+        try:
+            declared = int(img.get('width') or 0)
+        except ValueError:
+            declared = 0
+        figure = img.find_parent('figure')
+        if figure is not None and declared >= 1100:
+            figure['class'] = 'bleed'
+    root = soup.body or soup
+    return root.decode_contents()
 
 
-def generate_html(article: ArticleData) -> str:
-    """Generate a clean HTML file from parsed article data.
-    
-    Args:
-        article: ArticleData object with parsed content
-        
-    Returns:
-        str: Complete HTML document
-    """
-    # Build meta information
-    meta_parts = []
-    if article.author:
-        meta_parts.append(f'<span class="article-author">By {article.author}</span>')
-    if article.publication_date:
-        formatted_date = format_date(article.publication_date)
-        if formatted_date:
-            meta_parts.append(f'<div class="article-date">{formatted_date}</div>')
-    
-    meta = '\n                '.join(meta_parts) if meta_parts else ''
-    
-    # Build image HTML
-    image_html = ''
+# ---------------------------------------------------------------------------
+# Article page
+# ---------------------------------------------------------------------------
+
+def generate_html(article: ArticleData, saved_at: Optional[datetime] = None) -> str:
+    """Generate the reading page for one article."""
+    saved_at = saved_at or datetime.now()
+    title = article.title or 'Article'
+    body_html = _prepare_body(article.body or '')
+    date_display = format_date(article.publication_date)
+    read_time = article.read_time
+
+    # Byline
+    byline_bits = []
+    if article.author_avatar:
+        byline_bits.append(f'<img src="{esc(article.author_avatar)}" alt="" loading="lazy">')
+    who = f'<span class="who">{esc(article.author)}</span>' if article.author else ''
+    details = ' · '.join(x for x in [date_display, f'{read_time} min read' if read_time else ''] if x)
+    byline_bits.append(f'<div>{who}{"<br>" if who and details else ""}{esc(details)}</div>')
+    if article.url:
+        byline_bits.append(f'<a class="original" href="{esc(article.url)}" target="_blank" rel="noopener">Read on Medium ↗</a>')
+    byline = f'<div class="byline">{"".join(byline_bits)}</div>' if (who or details or article.url) else ''
+
+    subtitle = f'<p class="article-subtitle">{esc(article.subtitle)}</p>' if article.subtitle else ''
+
+    cover = ''
     if article.image:
-        image_html = f'<img src="{article.image}" alt="{article.title}" class="article-image">'
-    
-    # Build description HTML
-    description_html = ''
-    if article.description:
-        description_html = f'<div class="article-description">{article.description}</div>'
-    
-    # Clean and process body
-    body_html = clean_html_body(article.body)
-    
-    # Fill template
-    html = HTML_TEMPLATE.format(
-        title=article.title or 'Article',
-        meta=meta,
-        image=image_html,
-        description=description_html,
-        body=body_html
-    )
-    
-    return html
+        caption = f'<figcaption>{article.image_caption}</figcaption>' if article.image_caption else ''
+        cover = (f'<figure class="cover"><img src="{esc(article.image)}" data-full="{esc(article.image)}" alt="" '
+                 f'loading="eager">{caption}</figure>')
+
+    heads = build_toc(body_html)
+    toc_inline = toc_side = ''
+    if len(heads) >= 3:
+        toc = _toc_list(heads)
+        toc_inline = f'<details class="toc toc-inline"><summary>Contents</summary>{toc}</details>'
+        toc_side = f'<aside class="toc toc-side"><nav aria-label="Contents"><div class="label">Contents</div>{toc}</nav></aside>'
+
+    footer_bits = []
+    if article.url:
+        footer_bits.append(f'Original: <a href="{esc(article.url)}" target="_blank" rel="noopener">{esc(article.url)}</a>')
+    footer_bits.append(f'Saved {_short(saved_at)} via {esc(_source_label(article.source, article.url))} with medium-reader.')
+
+    end_note = 'You’ve reached the end.'
+    meta = {
+        'mr:version': GENERATOR_VERSION,
+        'mr:url': article.url,
+        'mr:author': article.author,
+        'mr:date': article.publication_date,
+        'mr:read-time': str(read_time) if read_time else None,
+        'mr:cover': article.image or _first_image(body_html),
+        'mr:subtitle': article.subtitle,
+        'mr:source': article.source,
+        'mr:saved': saved_at.isoformat(timespec='seconds'),
+    }
+    meta_tags = '\n'.join(f'<meta name="{k}" content="{esc(v)}">' for k, v in meta.items() if v)
+    description = article.subtitle or article.description
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{esc(title)}</title>
+{f'<meta name="description" content="{esc(description)}">' if description else ''}
+{meta_tags}
+<script>{BOOT_JS}</script>
+<style>{BASE_CSS}{ARTICLE_CSS}</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<div class="topbar" id="topbar"><div class="topbar-inner">
+  <a class="home" href="index.html">← Library</a>
+  <span class="time-left" id="time-left"></span>
+  <button class="aa" id="aa" type="button" aria-label="Reading settings" aria-expanded="false" aria-controls="settings">Aa</button>
+</div></div>
+{SETTINGS_HTML}
+<main class="page">
+  {toc_side}
+  <header class="article-header">
+    <h1 class="article-title">{esc(title)}</h1>
+    {subtitle}
+    {byline}
+    {toc_inline}
+  </header>
+  {cover}
+  <article class="article-body" id="article-body"{f' data-read-time="{read_time}"' if read_time else ''}>
+{body_html}
+  </article>
+  <footer class="article-footer">
+    <div class="end-mark"><span>{esc(end_note)}</span><a href="index.html">Back to library →</a></div>
+    {'<br>'.join(footer_bits)}
+  </footer>
+</main>
+
+<script>{ARTICLE_JS}</script>
+</body>
+</html>
+"""
+
+
+def _first_image(body_html: str) -> Optional[str]:
+    img = BeautifulSoup(body_html or '', 'lxml').find('img')
+    return img.get('src') if img is not None else None
+
+
+# ---------------------------------------------------------------------------
+# Library index
+# ---------------------------------------------------------------------------
+
+def generate_index(entries: Iterable[dict]) -> str:
+    """Library page. Each entry: file, title, author, subtitle, date, read_time, cover, saved."""
+    entries = list(entries)
+    cards = []
+    for e in entries:
+        meta = ' · '.join(x for x in [e.get('author'), format_date(e.get('date')),
+                                      f"{e['read_time']} min" if e.get('read_time') else None] if x)
+        search = ' '.join(x for x in [e.get('title'), e.get('author'), e.get('subtitle')] if x).lower()
+        thumb = f' style="background-image:url(&quot;{esc(e["cover"])}&quot;)"' if e.get('cover') else ''
+        subtitle = f'<p>{esc(e["subtitle"])}</p>' if e.get('subtitle') else ''
+        cards.append(
+            f'<a class="card" href="{esc(_href(e["file"]))}" data-search="{esc(search)}">'
+            f'<div class="thumb"{thumb}></div><div class="info"><h2>{esc(e.get("title"))}</h2>{subtitle}'
+            f'<div class="meta">{esc(meta)}</div></div></a>')
+    grid = f'<div class="grid">{"".join(cards)}</div>' if cards else '<p class="empty">No saved articles yet.</p>'
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reading Library</title>
+<script>{BOOT_JS}</script>
+<style>{BASE_CSS}{INDEX_CSS}</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="lib-head"><div><h1>Reading Library</h1>
+  <p class="count"><span id="shown">{len(entries)}</span> of {len(entries)} saved articles</p></div>
+  <button class="theme" id="theme-btn" type="button">Theme: Auto</button></div>
+  <div class="tools"><input id="q" type="search" placeholder="Search titles and authors" autocomplete="off"></div>
+  {grid}
+</div>
+<script>{INDEX_JS}</script>
+</body>
+</html>
+"""
+
+
+def _href(filename: str) -> str:
+    from urllib.parse import quote
+    return quote(filename)

@@ -4,12 +4,13 @@ A command-line tool to fetch Medium articles, save them locally, and open them i
 
 ## Features
 
-- 📖 Fetch Medium articles via command line
-- 💾 Save articles as clean, readable HTML files
-- 🌐 Automatically open articles in your default browser
-- 🔓 Bypass Medium's paywall restrictions
-- 📚 Store articles locally for offline reading
-- 🎨 Clean, readable formatting with proper styling
+- 📖 Fetch Medium articles from the command line
+- 🔓 Member-only articles are read through freedium proxies (freedium.cfd, then freedium-mirror.cfd)
+- 🖼️ Images, captions, code blocks and embeds kept, with image links that work from a local file
+- 🎨 A clean reader view with reading settings (theme, font, size, spacing, width), time left,
+  resume-where-you-stopped, a table of contents, click-to-zoom images and print styles
+- 📚 A library page (`index.html`) listing everything you have saved, with search
+- 💾 `--offline` downloads the images too, so articles read without a connection
 
 ## Requirements
 
@@ -94,51 +95,69 @@ The tool will automatically:
 
 ### Command Options
 
-- `--no-open`: Save the article without opening it in the browser
-  ```bash
-  medium-read https://medium.com/@author/article-title --no-open
-  ```
+| Option | What it does |
+| --- | --- |
+| `--no-open` | Save without opening the browser |
+| `--offline` | Also download the article's images next to it, for reading without a connection |
+| `--proxy` | Skip medium.com and go straight to the freedium proxies |
+| `--library` | Open the library of saved articles |
+| `--repair` | Re-render every saved article with the current reader (see below) |
+| `-y`, `--yes` | Don't ask before fetching a URL that isn't on medium.com (custom publication domains) |
+| `--debug` | Show every request, redirect and fallback |
 
-- `--help`: Show help message
-  ```bash
-  medium-read --help
-  ```
+### Reading
 
-### Viewing Saved Articles
+Each article page has an **Aa** button (top right) for theme (auto, light, sepia, dark), serif or
+sans text, text size, line spacing and column width. Your choices apply to every saved article.
+The top bar hides while you read down and comes back when you scroll up; it shows the time left.
+Reopen an article and it offers to take you back to where you stopped. Click any image to
+enlarge it.
 
-All articles are saved to `~/.medium-reader/articles/` (or `/Users/your-username/.medium-reader/articles/` on macOS).
+### Your Library
 
-You can:
-- Open them directly in your browser
-- Access them from the command line:
-  ```bash
-  open ~/.medium-reader/articles/article-name.html  # macOS
-  xdg-open ~/.medium-reader/articles/article-name.html  # Linux
-  ```
+Articles are saved to `~/.medium-reader/articles/` (set `MEDIUM_READER_DIR` to use another folder).
+`index.html` in that folder lists them all, newest first, with a search box:
+
+```bash
+medium-read --library
+```
+
+Every article page links back to the library and to the original on Medium.
+
+### Upgrading Articles Saved by Older Versions
+
+Older versions saved member-only articles with image paths like `/img/medium/700/...`, which a
+browser can't load from a local file, and sometimes garbled characters (`Donât`). Re-render
+everything with:
+
+```bash
+medium-read --repair
+```
+
+The articles folder is copied to `~/.medium-reader/backup-<timestamp>/` first. Pages that never
+held an article (an old save of a member-only preview, for example) are left untouched and listed;
+fetch those again.
 
 ## How It Works
 
-1. **Fetching**: The tool uses browser-like headers to fetch the article HTML, avoiding bot detection
-2. **Parsing**: It extracts article content from Medium's JSON-LD structured data and HTML
-3. **Generation**: Creates a clean, readable HTML file with proper styling
-4. **Storage**: Saves articles to `~/.medium-reader/articles/` with sanitized filenames
-5. **Display**: Opens the saved HTML file in your default browser
+1. **Fetching**: The article is fetched from Medium first. If Medium marks it member-only
+   (`isAccessibleForFree: false`) or blocks the request, each freedium proxy is tried in turn.
+   If every proxy fails, the Medium preview is saved and you get a warning.
+2. **Parsing**: The article text is taken from whichever page shape came back (Medium,
+   freedium-mirror or the older freedium layout) and cleaned into plain HTML: framework classes,
+   inline styles and reader UI removed, every image pointed at Medium's public image CDN
+   (`miro.medium.com`), captions turned into real `<figcaption>`s.
+3. **Generation**: The reader page is built with the title, author, date, read time and cover
+   in one header.
+4. **Storage**: Saving the same article again replaces the earlier copy; the library page is
+   rebuilt after every save.
 
 ## Article Storage
 
-### Storage Location
-
-Articles are saved to `~/.medium-reader/articles/` with filenames based on the article title. 
-
-**Full path examples:**
-- macOS/Linux: `/Users/your-username/.medium-reader/articles/`
-- The directory is created automatically on first use
-
-### File Naming
-
-- Filenames are based on the article title (sanitized for filesystem compatibility)
-- If a file with the same name already exists, a number suffix is added (e.g., `article-title-1.html`)
-- Files are saved as `.html` files that can be opened in any web browser
+- Filenames come from the article title.
+- Re-fetching an article overwrites its file (matched by Medium's post id), so there are no
+  `-1`, `-2` copies.
+- With `--offline`, images go to `~/.medium-reader/articles/assets/<article>/`.
 
 ## Troubleshooting
 
@@ -164,10 +183,12 @@ Articles are saved to `~/.medium-reader/articles/` with filenames based on the a
 - Check your system's default browser settings
 
 **Truncated articles**
-- Some Medium articles are "Member-only" stories that are behind a paywall
-- Medium only serves a preview of these articles, so the full content may not be available
-- This is a limitation of Medium's paywall system, not the tool itself
-- Free/public articles should work completely
+- Member-only articles are read through the freedium proxies. If both are down, only Medium's
+  preview is saved and `medium-read` prints a warning. Try again later, or with `--debug` to see
+  which proxy failed.
+
+**Images missing in older saves**
+- Run `medium-read --repair` (see above).
 
 **Conda environment issues**
 - Make sure conda is properly installed and in your PATH
@@ -183,6 +204,12 @@ cd medium-reader
 git pull  # if using git
 conda activate medium-reader
 pip install -e .
+```
+
+## Development
+
+```bash
+python -m unittest discover -s tests
 ```
 
 ## Contributing
